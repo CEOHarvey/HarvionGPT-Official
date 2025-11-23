@@ -4,6 +4,8 @@ import bcrypt from 'bcryptjs'
 import { sendWelcomeEmail, sendVerificationEmail } from '@/lib/email'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const registerSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),

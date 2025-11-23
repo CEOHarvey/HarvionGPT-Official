@@ -6,6 +6,8 @@ import { callAIModel, ModelType } from '@/lib/ai-models'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 
+export const dynamic = 'force-dynamic'
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
