@@ -222,7 +222,8 @@ AI_SYSTEM_PROMPT=your-system-prompt
 
 1. Go back to Render dashboard
 2. Update `FRONTEND_URL` to your actual Vercel URL
-3. Update `NEXTAUTH_URL` to your actual Vercel URL
+   - **IMPORTANT:** No trailing slash! Use `https://harviongptofficial.vercel.app` NOT `https://harviongptofficial.vercel.app/`
+3. Update `NEXTAUTH_URL` to your actual Vercel URL (no trailing slash)
 4. Redeploy if needed
 
 ### 8.2 Update Vercel Frontend Environment

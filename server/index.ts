@@ -16,10 +16,32 @@ const app = express()
 const prisma = new PrismaClient()
 const PORT = process.env.PORT || 3001
 
-// Middleware
+// Middleware - CORS configuration
+// Normalize FRONTEND_URL to remove trailing slashes
+const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000'
+const normalizedFrontendUrl = frontendUrl.replace(/\/+$/, '') // Remove trailing slashes
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      return callback(null, true)
+    }
+    
+    // Normalize the origin to remove trailing slashes
+    const normalizedOrigin = origin.replace(/\/+$/, '')
+    
+    // Check if origin matches (case-insensitive)
+    if (normalizedOrigin === normalizedFrontendUrl || normalizedOrigin === frontendUrl) {
+      callback(null, true)
+    } else {
+      console.error(`CORS blocked: ${normalizedOrigin} !== ${normalizedFrontendUrl}`)
+      callback(new Error('Not allowed by CORS'))
+    }
+  },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id'],
 }))
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ extended: true, limit: '50mb' }))
