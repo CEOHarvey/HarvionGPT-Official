@@ -96,7 +96,7 @@ Or use: https://generate-secret.vercel.app/32
    - **Region**: Singapore (or closest)
    - **Branch**: `main`
    - **Root Directory**: `server` (important!)
-   - **Build Command**: `npm install && npx prisma generate && npm run build`
+   - **Build Command**: `npm install && npx prisma generate --schema=../prisma/schema.prisma && npm run build`
    - **Start Command**: `npm start`
 
 ### 6.2 Add Environment Variables in Render
@@ -109,10 +109,10 @@ DATABASE_URL=postgresql://user:password@host/database?sslmode=require
 
 # NextAuth (shared with frontend)
 NEXTAUTH_SECRET=your-generated-secret-here
-NEXTAUTH_URL=https://your-frontend.vercel.app
+NEXTAUTH_URL=https://HarvionGPT2.vercel.app
 
 # Frontend URL (for CORS)
-FRONTEND_URL=https://your-frontend.vercel.app
+FRONTEND_URL=https://HarvionGPT2.vercel.app
 
 # AI API
 GITHUB_TOKEN=your-github-token
