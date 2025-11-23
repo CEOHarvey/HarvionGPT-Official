@@ -89,8 +89,15 @@ export default function ChatInterface() {
     try {
       const data = await api.getChats(session)
       setChats(data)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching chats:', error)
+      const event = new CustomEvent('toast', {
+        detail: { 
+          message: error.message || 'Failed to load chats. Please refresh the page.', 
+          type: 'error' 
+        }
+      })
+      window.dispatchEvent(event)
     }
   }
 
@@ -99,8 +106,15 @@ export default function ChatInterface() {
     try {
       const data = await api.getChat(chatId, session)
       setMessages(data.messages || [])
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching chat:', error)
+      const event = new CustomEvent('toast', {
+        detail: { 
+          message: error.message || 'Failed to load chat messages.', 
+          type: 'error' 
+        }
+      })
+      window.dispatchEvent(event)
     }
   }
 

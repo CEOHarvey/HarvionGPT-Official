@@ -24,11 +24,29 @@ export async function apiRequest(
     headers['X-User-Id'] = session.user.id
   }
 
-  return fetch(url, {
-    ...options,
-    headers,
-    credentials: 'include',
-  })
+  // Add timeout to prevent infinite loading
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers,
+      credentials: 'include',
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
+    return response
+  } catch (error: any) {
+    clearTimeout(timeoutId)
+    if (error.name === 'AbortError') {
+      throw new Error('Request timeout. Please check your connection and try again.')
+    }
+    if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
+      throw new Error('Cannot connect to server. Please check your internet connection and ensure the backend is running.')
+    }
+    throw error
+  }
 }
 
 export const api = {
