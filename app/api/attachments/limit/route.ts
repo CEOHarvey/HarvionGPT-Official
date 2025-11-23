@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { getAttachmentLimitInfo } from '@/lib/attachments'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 export async function GET(req: NextRequest) {
   try {
