@@ -61,7 +61,7 @@ export async function callAIModel(
         })
 
         // Convert model ID to API format
-        let modelName = modelConfig.id
+        let modelName: string = modelConfig.id
         if (modelConfig.id === 'gpt-4.1') {
           modelName = 'openai/gpt-4.1'
         } else if (modelConfig.id === 'gpt-4.1-mini') {
@@ -80,11 +80,13 @@ export async function callAIModel(
         if (isUnexpected(apiResponse)) {
           const error = apiResponse.body?.error
           // Check if it's a rate limit error
-          if (error?.code === 429 || error?.message?.toLowerCase().includes('rate limit')) {
+          const errorCode = typeof error?.code === 'number' ? error.code : typeof error?.code === 'string' ? parseInt(error.code) : null
+          const errorMessage = typeof error?.message === 'string' ? error.message : String(error?.message || '')
+          if (errorCode === 429 || errorMessage.toLowerCase().includes('rate limit')) {
             console.log(`Rate limit on ${modelConfig.name}, trying next model...`)
             continue // Try next model
           }
-          throw new Error(error?.message || 'Unexpected response from AI API')
+          throw new Error(errorMessage || 'Unexpected response from AI API')
         }
 
         response = apiResponse.body.choices[0]?.message?.content || 'No response from AI'
@@ -113,11 +115,16 @@ export async function callAIModel(
 
         if (error) {
           // Check if it's a rate limit error
-          if (error.message?.toLowerCase().includes('rate limit') || error.code === 429) {
+          const errorObj = typeof error === 'object' && error !== null ? error as any : null
+          const errorMessage = errorObj?.message || (typeof error === 'string' ? error : String(error))
+          const errorCode = errorObj?.code
+          const isRateLimit = errorMessage?.toLowerCase().includes('rate limit') || errorCode === 429 || errorCode === '429'
+          
+          if (isRateLimit) {
             console.log(`Rate limit on ${modelConfig.name}, trying next model...`)
             continue // Try next model
           }
-          throw error
+          throw typeof error === 'object' ? error : new Error(String(error))
         }
 
         // Handle Bytez output - it might be an object or string
