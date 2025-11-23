@@ -37,9 +37,9 @@ async function fetchWithAuth(url: string, options: RequestInit = {}) {
   // We'll use a workaround: pass userId and verify on backend with session
   const token = session.user?.id
 
-  const headers = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...options.headers,
+    ...(options.headers as Record<string, string>),
   }
 
   // If we have a token, add Authorization header
