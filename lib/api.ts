@@ -11,9 +11,9 @@ export async function apiRequest(
 ): Promise<Response> {
   const url = useBackendAPI ? `${API_BASE_URL}${endpoint}` : endpoint
 
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...options.headers,
+    ...(options.headers as Record<string, string>),
   }
 
   // If using backend API and we have a session, add auth header
@@ -83,7 +83,7 @@ export const api = {
     const formData = new FormData()
     formData.append('file', file)
 
-    const headers: HeadersInit = {}
+    const headers: Record<string, string> = {}
     if (API_BASE_URL && session?.user?.id) {
       headers['X-User-Id'] = session.user.id
     }

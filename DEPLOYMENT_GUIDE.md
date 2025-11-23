@@ -109,10 +109,10 @@ DATABASE_URL=postgresql://user:password@host/database?sslmode=require
 
 # NextAuth (shared with frontend)
 NEXTAUTH_SECRET=your-generated-secret-here
-NEXTAUTH_URL=https://HarvionGPT2.vercel.app
+NEXTAUTH_URL=https://your-frontend.vercel.app
 
 # Frontend URL (for CORS)
-FRONTEND_URL=https://HarvionGPT2.vercel.app
+FRONTEND_URL=https://your-frontend.vercel.app
 
 # AI API
 GITHUB_TOKEN=your-github-token
