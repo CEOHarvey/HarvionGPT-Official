@@ -151,13 +151,43 @@ PORT=10000
 
 Go to Settings → Environment Variables:
 
+**IMPORTANT:** Choose one of these configurations:
+
+#### Option A: Use Render Backend (Recommended)
+
 ```env
-# Database (same as backend)
-DATABASE_URL=postgresql://user:password@host/database?sslmode=require
+# Backend API URL (REQUIRED - points to Render backend)
+NEXT_PUBLIC_API_URL=https://your-backend.onrender.com
 
 # NextAuth
 NEXTAUTH_URL=https://your-frontend.vercel.app
 NEXTAUTH_SECRET=your-generated-secret-here (SAME as backend!)
+
+# Database (REQUIRED for NextAuth session storage)
+DATABASE_URL=postgresql://user:password@host/database?sslmode=require
+
+# Gmail OAuth
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+
+# Email Service (optional - only if using email features)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-16-char-app-password
+```
+
+#### Option B: Use Local API Routes (Not Recommended)
+
+If you don't set `NEXT_PUBLIC_API_URL`, the frontend will use local Next.js API routes and needs all backend environment variables:
+
+```env
+# Database (REQUIRED)
+DATABASE_URL=postgresql://user:password@host/database?sslmode=require
+
+# NextAuth
+NEXTAUTH_URL=https://your-frontend.vercel.app
+NEXTAUTH_SECRET=your-generated-secret-here
 
 # Gmail OAuth
 GOOGLE_CLIENT_ID=your-google-client-id
@@ -169,13 +199,11 @@ SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
 SMTP_PASSWORD=your-16-char-app-password
 
-# Backend API URL (IMPORTANT!)
-NEXT_PUBLIC_API_URL=https://harvion-gpt-backend.onrender.com
-
-# AI API (optional - only if frontend needs direct access)
+# AI API
 GITHUB_TOKEN=your-github-token
 AI_API_URL=https://models.github.ai/inference
 BYTEZ_KEY=your-bytez-key
+AI_SYSTEM_PROMPT=your-system-prompt
 ```
 
 **Critical**: Set `NEXT_PUBLIC_API_URL` to your Render backend URL!
