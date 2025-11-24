@@ -42,7 +42,7 @@ const withTimeout = async <T>(promise: PromiseLike<T>, modelName: string): Promi
       reject(error)
     }, MODEL_TIMEOUT_MS)
 
-    promise
+    Promise.resolve(promise)
       .then((value) => {
         clearTimeout(timer)
         resolve(value)
