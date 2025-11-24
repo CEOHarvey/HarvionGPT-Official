@@ -22,6 +22,37 @@ export const MODELS: ModelConfig[] = [
   { id: 'gpt-4.1-mini', name: 'GPT-4.1 MINI', priority: 3, provider: 'azure' },
 ]
 
+const MODEL_TIMEOUT_MS = 8000
+let lastSuccessfulAutoModel: ModelType | null = null
+
+const isRateLimitError = (status?: number, code?: unknown, message?: string) => {
+  if (status === 429) return true
+  if (typeof code === 'number' && code === 429) return true
+  if (typeof code === 'string' && code.trim() === '429') return true
+  if (typeof message === 'string' && message.toLowerCase().includes('rate limit')) return true
+  return false
+}
+
+const withTimeout = async <T>(promise: PromiseLike<T>, modelName: string): Promise<T> => {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const error = new Error(`${modelName} did not respond in time`)
+      ;(error as any).code = 'MODEL_TIMEOUT'
+      reject(error)
+    }, MODEL_TIMEOUT_MS)
+
+    Promise.resolve(promise)
+      .then((value) => {
+        clearTimeout(timer)
+        resolve(value)
+      })
+      .catch((error) => {
+        clearTimeout(timer)
+        reject(error)
+      })
+  })
+}
+
 export async function callAIModel(
   messages: AIMessage[],
   selectedModel: ModelType,
@@ -35,32 +66,37 @@ export async function callAIModel(
     throw new Error('GITHUB_TOKEN or AI_API_KEY is not set')
   }
 
-  // If auto mode, try models in priority order
-  const modelsToTry = selectedModel === 'auto' 
-    ? MODELS.sort((a, b) => a.priority - b.priority)
-    : [MODELS.find(m => m.id === selectedModel)!].filter(Boolean)
+  const buildAutoList = () => {
+    const sorted = [...MODELS].sort((a, b) => a.priority - b.priority)
+    if (lastSuccessfulAutoModel && lastSuccessfulAutoModel !== 'auto') {
+      const idx = sorted.findIndex((m) => m.id === lastSuccessfulAutoModel)
+      if (idx > 0) {
+        const [favored] = sorted.splice(idx, 1)
+        sorted.unshift(favored)
+      }
+    }
+    return sorted
+  }
+
+  const modelsToTry =
+    selectedModel === 'auto'
+      ? buildAutoList()
+      : [MODELS.find((m) => m.id === selectedModel)!].filter(Boolean)
 
   for (const modelConfig of modelsToTry) {
     try {
       let response: string
 
       if (modelConfig.provider === 'azure') {
-        // Azure AI Inference
-        const client = ModelClient(
-          endpoint,
-          new AzureKeyCredential(token),
-        )
+        const client = ModelClient(endpoint, new AzureKeyCredential(token))
 
-        // Build messages with images if any
         const apiMessages = messages.map((msg) => {
           if (typeof msg.content === 'string') {
             return { role: msg.role, content: msg.content }
           }
-          // Handle content array (for images)
           return { role: msg.role, content: msg.content }
         })
 
-        // Convert model ID to API format
         let modelName: string = modelConfig.id
         if (modelConfig.id === 'gpt-4.1') {
           modelName = 'openai/gpt-4.1'
@@ -68,107 +104,111 @@ export async function callAIModel(
           modelName = 'openai/gpt-4.1-mini'
         }
 
-        const apiResponse = await client.path('/chat/completions').post({
-          body: {
-            messages: apiMessages,
-            temperature: 0.7, // Lowered temperature for more deterministic responses
-            top_p: 1,
-            model: modelName,
-          },
-        })
+        const apiResponse = await withTimeout(
+          client.path('/chat/completions').post({
+            body: {
+              messages: apiMessages,
+              temperature: 0.7,
+              top_p: 1,
+              model: modelName,
+            },
+          }),
+          modelConfig.name
+        )
 
         if (isUnexpected(apiResponse)) {
           const error = apiResponse.body?.error
-          // Check if it's a rate limit error
-          const errorCode = typeof error?.code === 'number' ? error.code : typeof error?.code === 'string' ? parseInt(error.code) : null
-          const errorMessage = typeof error?.message === 'string' ? error.message : String(error?.message || '')
-          if (errorCode === 429 || errorMessage.toLowerCase().includes('rate limit')) {
+          const status = (apiResponse as any).status
+          const errorCode = error?.code ?? status
+          const errorMessage =
+            typeof error?.message === 'string'
+              ? error.message
+              : typeof apiResponse.body === 'string'
+                ? apiResponse.body
+                : String(error?.message || 'Unexpected response from AI API')
+
+          if (isRateLimitError(status, errorCode, errorMessage)) {
             console.log(`Rate limit on ${modelConfig.name}, trying next model...`)
-            continue // Try next model
+            continue
           }
+
           throw new Error(errorMessage || 'Unexpected response from AI API')
         }
 
-        response = apiResponse.body.choices[0]?.message?.content || 'No response from AI'
+        response = apiResponse.body.choices[0]?.message?.content || ''
       } else {
-        // Bytez
         const sdk = new Bytez(bytezKey)
         const model = sdk.model('openai/gpt-4.1')
 
-        // Convert messages format for Bytez
-        // Note: Bytez may not support image content arrays, so we extract text only
         const bytezMessages = messages.map((msg) => {
           if (typeof msg.content === 'string') {
             return { role: msg.role, content: msg.content }
           }
-          // Extract text from content array
-          const textContent = msg.content.find(c => c.type === 'text')?.text || ''
-          // Add note about images if present
-          const imageCount = msg.content.filter(c => c.type === 'image_url').length
-          const content = imageCount > 0 
-            ? `${textContent}\n\n[${imageCount} image(s) attached - image analysis may be limited]`
-            : textContent
+          const textContent = msg.content.find((c) => c.type === 'text')?.text || ''
+          const imageCount = msg.content.filter((c) => c.type === 'image_url').length
+          const content =
+            imageCount > 0
+              ? `${textContent}\n\n[${imageCount} image(s) attached - image analysis may be limited]`
+              : textContent
           return { role: msg.role, content }
         })
 
-        const { error, output } = await model.run(bytezMessages)
+        const { error, output } = await withTimeout(model.run(bytezMessages), modelConfig.name)
 
         if (error) {
-          // Check if it's a rate limit error
-          const errorObj = typeof error === 'object' && error !== null ? error as any : null
+          const errorObj = typeof error === 'object' && error !== null ? (error as any) : null
           const errorMessage = errorObj?.message || (typeof error === 'string' ? error : String(error))
-          const errorCode = errorObj?.code
-          const isRateLimit = errorMessage?.toLowerCase().includes('rate limit') || errorCode === 429 || errorCode === '429'
-          
-          if (isRateLimit) {
+          const errorCode = errorObj?.code ?? errorObj?.status
+
+          if (isRateLimitError(undefined, errorCode, errorMessage)) {
             console.log(`Rate limit on ${modelConfig.name}, trying next model...`)
-            continue // Try next model
+            continue
           }
           throw typeof error === 'object' ? error : new Error(String(error))
         }
 
-        // Handle Bytez output - it might be an object or string
         if (typeof output === 'object' && output !== null) {
-          // If output is an object, extract the content
-          if (typeof output.content === 'string') {
-            response = output.content
-          } else if (typeof output.message === 'string') {
-            response = output.message
-          } else if (typeof output.text === 'string') {
-            response = output.text
+          if (typeof (output as any).content === 'string') {
+            response = (output as any).content
+          } else if (typeof (output as any).message === 'string') {
+            response = (output as any).message
+          } else if (typeof (output as any).text === 'string') {
+            response = (output as any).text
           } else {
-            // Try to stringify if it's an object
             response = JSON.stringify(output)
           }
         } else {
-          response = output || 'No response from AI'
+          response = (output as string) || ''
         }
-        
-        // Ensure response is a string
+
         if (typeof response !== 'string') {
           response = String(response)
         }
       }
 
+      if (!response || !response.trim()) {
+        throw new Error(`${modelConfig.name} returned an empty response`)
+      }
+
+      if (selectedModel === 'auto') {
+        lastSuccessfulAutoModel = modelConfig.id
+      }
+
       return {
         success: true,
-        response,
+        response: response.trim(),
         modelUsed: modelConfig.name,
       }
     } catch (error: any) {
       console.error(`Error with ${modelConfig.name}:`, error.message || error)
-      
-      // Check if it's a rate limit error
+
       if (
-        error.message?.toLowerCase().includes('rate limit') ||
-        error.code === 429 ||
-        error.status === 429
+        error.code === 'MODEL_TIMEOUT' ||
+        isRateLimitError(error.status ?? error.statusCode, error.code, error.message)
       ) {
-        // Continue to next model
         continue
       }
 
-      // If it's the last model or not auto mode, return error
       if (selectedModel !== 'auto' || modelConfig === modelsToTry[modelsToTry.length - 1]) {
         return {
           success: false,
@@ -178,7 +218,6 @@ export async function callAIModel(
     }
   }
 
-  // All models failed
   return {
     success: false,
     error: 'All models are currently unavailable. Please try again later.',
