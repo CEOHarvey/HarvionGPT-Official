@@ -11,9 +11,11 @@ export async function apiRequest(
 ): Promise<Response> {
   const url = useBackendAPI ? `${API_BASE_URL}${endpoint}` : endpoint
 
+  const { signal: externalSignal, ...restOptions } = options
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
+    ...(restOptions.headers as Record<string, string>),
   }
 
   // If using backend API and we have a session, add auth header
@@ -24,23 +26,52 @@ export async function apiRequest(
     headers['X-User-Id'] = session.user.id
   }
 
-  // Add timeout to prevent infinite loading
+  // Add timeout to prevent infinite loading while still respecting manual aborts
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+  const cleanupFns: Array<() => void> = []
+  let abortedByUser = false
+  let timedOut = false
+
+  const timeoutId = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, 30000) // 30 second timeout
+  cleanupFns.push(() => clearTimeout(timeoutId))
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      abortedByUser = true
+      controller.abort()
+    } else {
+      const handleExternalAbort = () => {
+        abortedByUser = true
+        controller.abort()
+      }
+      externalSignal.addEventListener('abort', handleExternalAbort)
+      cleanupFns.push(() => externalSignal.removeEventListener('abort', handleExternalAbort))
+    }
+  }
 
   try {
     const response = await fetch(url, {
-      ...options,
+      ...restOptions,
       headers,
       credentials: 'include',
       signal: controller.signal,
     })
-    clearTimeout(timeoutId)
+    cleanupFns.forEach((fn) => fn())
     return response
   } catch (error: any) {
-    clearTimeout(timeoutId)
-    if (error.name === 'AbortError') {
-      throw new Error('Request timeout. Please check your connection and try again.')
+    cleanupFns.forEach((fn) => fn())
+    if (abortedByUser) {
+      const abortError = new Error('Request aborted by user')
+      abortError.name = 'AbortError'
+      throw abortError
+    }
+    if (timedOut || error.name === 'AbortError') {
+      const timeoutError = new Error('Request timeout. Please check your connection and try again.')
+      timeoutError.name = 'AbortError'
+      throw timeoutError
     }
     if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
       throw new Error('Cannot connect to server. Please check your internet connection and ensure the backend is running.')

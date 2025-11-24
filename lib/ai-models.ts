@@ -22,6 +22,38 @@ export const MODELS: ModelConfig[] = [
   { id: 'gpt-4.1-mini', name: 'GPT-4.1 MINI', priority: 3, provider: 'azure' },
 ]
 
+let lastSuccessfulAutoModel: ModelType | null = null
+
+const MODEL_TIMEOUT_MS = 8000 // faster failover if a model stalls
+
+const isRateLimitError = (status?: number, code?: unknown, message?: string) => {
+  if (status === 429) return true
+  if (typeof code === 'number' && code === 429) return true
+  if (typeof code === 'string' && code.trim() === '429') return true
+  if (typeof message === 'string' && message.toLowerCase().includes('rate limit')) return true
+  return false
+}
+
+const withTimeout = async <T>(promise: Promise<T>, modelName: string): Promise<T> => {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const error = new Error(`${modelName} did not respond in time`)
+      ;(error as any).code = 'MODEL_TIMEOUT'
+      reject(error)
+    }, MODEL_TIMEOUT_MS)
+
+    promise
+      .then((value) => {
+        clearTimeout(timer)
+        resolve(value)
+      })
+      .catch((error) => {
+        clearTimeout(timer)
+        reject(error)
+      })
+  })
+}
+
 export async function callAIModel(
   messages: AIMessage[],
   selectedModel: ModelType,
@@ -36,9 +68,22 @@ export async function callAIModel(
   }
 
   // If auto mode, try models in priority order
-  const modelsToTry = selectedModel === 'auto' 
-    ? MODELS.sort((a, b) => a.priority - b.priority)
-    : [MODELS.find(m => m.id === selectedModel)!].filter(Boolean)
+  const buildAutoList = () => {
+    const sorted = [...MODELS].sort((a, b) => a.priority - b.priority)
+    if (lastSuccessfulAutoModel && lastSuccessfulAutoModel !== 'auto') {
+      const idx = sorted.findIndex((m) => m.id === lastSuccessfulAutoModel)
+      if (idx > 0) {
+        const [favored] = sorted.splice(idx, 1)
+        sorted.unshift(favored)
+      }
+    }
+    return sorted
+  }
+
+  const modelsToTry =
+    selectedModel === 'auto'
+      ? buildAutoList()
+      : [MODELS.find((m) => m.id === selectedModel)!].filter(Boolean)
 
   for (const modelConfig of modelsToTry) {
     try {
@@ -68,28 +113,38 @@ export async function callAIModel(
           modelName = 'openai/gpt-4.1-mini'
         }
 
-        const apiResponse = await client.path('/chat/completions').post({
-          body: {
-            messages: apiMessages,
-            temperature: 1,
-            top_p: 1,
-            model: modelName,
-          },
-        })
+        const apiResponse = await withTimeout(
+          client.path('/chat/completions').post({
+            body: {
+              messages: apiMessages,
+              temperature: 1,
+              top_p: 1,
+              model: modelName,
+            },
+          }),
+          modelConfig.name
+        )
 
         if (isUnexpected(apiResponse)) {
           const error = apiResponse.body?.error
-          // Check if it's a rate limit error
-          const errorCode = typeof error?.code === 'number' ? error.code : typeof error?.code === 'string' ? parseInt(error.code) : null
-          const errorMessage = typeof error?.message === 'string' ? error.message : String(error?.message || '')
-          if (errorCode === 429 || errorMessage.toLowerCase().includes('rate limit')) {
+          const status = (apiResponse as any).status
+          const errorCode = error?.code ?? status
+          const errorMessage =
+            typeof error?.message === 'string'
+              ? error.message
+              : typeof apiResponse.body === 'string'
+                ? apiResponse.body
+                : String(error?.message || 'Unexpected response from AI API')
+
+          if (isRateLimitError(status, errorCode, errorMessage)) {
             console.log(`Rate limit on ${modelConfig.name}, trying next model...`)
-            continue // Try next model
+            continue
           }
+
           throw new Error(errorMessage || 'Unexpected response from AI API')
         }
 
-        response = apiResponse.body.choices[0]?.message?.content || 'No response from AI'
+        response = apiResponse.body.choices[0]?.message?.content || ''
       } else {
         // Bytez
         const sdk = new Bytez(bytezKey)
@@ -111,18 +166,16 @@ export async function callAIModel(
           return { role: msg.role, content }
         })
 
-        const { error, output } = await model.run(bytezMessages)
+        const { error, output } = await withTimeout(model.run(bytezMessages), modelConfig.name)
 
         if (error) {
-          // Check if it's a rate limit error
-          const errorObj = typeof error === 'object' && error !== null ? error as any : null
+          const errorObj = typeof error === 'object' && error !== null ? (error as any) : null
           const errorMessage = errorObj?.message || (typeof error === 'string' ? error : String(error))
-          const errorCode = errorObj?.code
-          const isRateLimit = errorMessage?.toLowerCase().includes('rate limit') || errorCode === 429 || errorCode === '429'
+          const errorCode = errorObj?.code ?? errorObj?.status
           
-          if (isRateLimit) {
+          if (isRateLimitError(undefined, errorCode, errorMessage)) {
             console.log(`Rate limit on ${modelConfig.name}, trying next model...`)
-            continue // Try next model
+            continue
           }
           throw typeof error === 'object' ? error : new Error(String(error))
         }
@@ -150,9 +203,17 @@ export async function callAIModel(
         }
       }
 
+      if (!response || !response.trim()) {
+        throw new Error(`${modelConfig.name} returned an empty response`)
+      }
+
+      if (selectedModel === 'auto') {
+        lastSuccessfulAutoModel = modelConfig.id
+      }
+
       return {
         success: true,
-        response,
+        response: response.trim(),
         modelUsed: modelConfig.name,
       }
     } catch (error: any) {
@@ -160,9 +221,8 @@ export async function callAIModel(
       
       // Check if it's a rate limit error
       if (
-        error.message?.toLowerCase().includes('rate limit') ||
-        error.code === 429 ||
-        error.status === 429
+        error.code === 'MODEL_TIMEOUT' ||
+        isRateLimitError(error.status ?? error.statusCode, error.code, error.message)
       ) {
         // Continue to next model
         continue
