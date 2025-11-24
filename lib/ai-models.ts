@@ -34,7 +34,7 @@ const isRateLimitError = (status?: number, code?: unknown, message?: string) => 
   return false
 }
 
-const withTimeout = async <T>(promise: Promise<T>, modelName: string): Promise<T> => {
+const withTimeout = async <T>(promise: PromiseLike<T>, modelName: string): Promise<T> => {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       const error = new Error(`${modelName} did not respond in time`)
